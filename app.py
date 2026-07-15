@@ -29,28 +29,45 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
     else:
         try:
-            # محاولة قراءة الشيت الأساسي للأحداث
-            df = pd.read_excel(uploaded_file, sheet_name='All Actions', engine='openpyxl')
+            # محاولة قراءة الشيت المخصص لو موجود
+            df = pd.read_excel(uploaded_file, sheet_name='كل الأحداث', engine='openpyxl')
         except:
             df = pd.read_excel(uploaded_file, engine='openpyxl')
             
-    # تنظيف أسماء الأعمدة من أي مسافات
+    # تنظيف أسماء الأعمدة من أي مسافات وتحويلها لنص
     df.columns = df.columns.astype(str).str.strip()
     
-    # توحيد مسميات الأعمدة الأساسية
-    rename_dict = {
-        'X Start': 'x1', 'Y Start': 'y1', 
-        'X End': 'x2', 'Y End': 'y2',
-        'Player': 'Player', 'Action': 'Action'
-    }
+    # خريطة ذكية لتوحيد مسميات الأعمدة (سواء كابيتال أو سمول أو عربي)
+    rename_dict = {}
+    for col in df.columns:
+        c_low = col.lower()
+        if c_low in ['x start', 'x_start', 'x1', 'start x', 'pos x']: rename_dict[col] = 'x1'
+        elif c_low in ['y start', 'y_start', 'y1', 'start y', 'pos y']: rename_dict[col] = 'y1'
+        elif c_low in ['x end', 'x_end', 'x2', 'end x', 'pos x2']: rename_dict[col] = 'x2'
+        elif c_low in ['y end', 'y_end', 'y2', 'end y', 'pos y2']: rename_dict[col] = 'y2'
+        elif c_low in ['player', 'اللاعب', 'لاعب']: rename_dict[col] = 'Player'
+        elif c_low in ['action', 'الأكشن', 'حدث', 'event']: rename_dict[col] = 'Action'
+
+    # إعادة تسمية الأعمدة بناءً على الفحص الذكي
     df = df.rename(columns=rename_dict)
     
-    # التأكد من وجود الأعمدة الحركية لبدء التحليل
+    # حل مشكلة تكرار اسم عمود Action لو وجد
+    if isinstance(df.get('Action'), pd.DataFrame):
+        # لو رجع جدول بسبب التكرار ناخد أول عمود فيه
+        df['Action_Clean'] = df['Action'].iloc[:, 0].fillna('Other').astype(str).str.strip()
+    elif 'Action' in df.columns:
+        df['Action_Clean'] = df['Action'].fillna('Other').astype(str).str.strip()
+    else:
+        df['Action_Clean'] = 'Other'
+    
+    # التأكد من وجود الإحداثيات الأساسية لبدء التحليل
     if 'x1' in df.columns and 'y1' in df.columns:
         
         # تحويل الإحداثيات لأرقام ومعالجة القيم المفقودة
         for col in ['x1', 'y1', 'x2', 'y2']:
             if col in df.columns:
+                if isinstance(df[col], pd.DataFrame): # حماية ضد الأعمدة المكررة
+                    df[col] = df[col].iloc[:, 0]
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # تحجيم الإحداثيات (Scaling) بناءً على نوع الإدخال (نسبة مئوية أم أبعاد فعلية)
@@ -64,28 +81,32 @@ if uploaded_file is not None:
             df['x2_scaled'] = df['x2'] if 'x2' in df.columns else np.nan
             df['y2_scaled'] = df['y2'] if 'y2' in df.columns else np.nan
 
-        # تنظيف عمود الأكشن وتصنيفه تكتيكياً
-        df['Action'] = df['Action'].fillna('Other').astype(str).str.strip()
-        
+        # تصنيف الأكشن تكتيكياً بناءً على محتوى الملف الجديد
         def classify_action(val):
             val = val.lower()
             if 'pass' in val or 'تمرير' in val: return "Pass"
             if 'shot' in val or 'sh/a' in val or 'تسديد' in val: return "Shot"
-            if 'tackle' in val or 'تدخل' in val or 'pressing' in val or 'ضغط' in val: return "Defensive Action"
+            if 'tackle' in val or 'تدخل' in val or 'pressing' in val or 'ضغط' in val or 'counter' in val: return "Defensive Action"
             if 'clearance' in val or 'تشتيت' in val or 'تخليص' in val: return "Clearance"
             if 'interception' in val or 'extraction' in val or 'قطع' in val: return "Interception"
             if 'aerial' in val or 'هوائي' in val: return "Aerial Duel"
             if 'ground' in val or 'أرضي' in val: return "Ground Duel"
             return "Other"
 
-        df['Event_Type'] = df['Action'].apply(classify_action)
+        df['Event_Type'] = df['Action_Clean'].apply(classify_action)
 
         # 4. فلاتر العرض التفاعلية (Sidebar Filters)
         st.sidebar.write("---")
         st.sidebar.header("🔍 فلاتر الملعب")
         
         # فلتر اللاعبين
-        players = ["جميع اللاعبين"] + sorted(df['Player'].dropna().astype(str).unique().tolist())
+        if 'Player' in df.columns:
+            if isinstance(df['Player'], pd.DataFrame):
+                df['Player'] = df['Player'].iloc[:, 0]
+            players = ["جميع اللاعبين"] + sorted(df['Player'].dropna().astype(str).unique().tolist())
+        else:
+            players = ["جميع اللاعبين"]
+            
         selected_player = st.sidebar.selectbox("اختر اللاعب:", players)
         
         # فلتر الأحداث
@@ -93,7 +114,10 @@ if uploaded_file is not None:
         selected_events = st.sidebar.multiselect("اختر الأحداث للعرض:", options=available_events, default=available_events)
         
         # تطبيق الفلترة على البيانات
-        filtered_df = df if selected_player == "جميع اللاعبين" else df[df['Player'].astype(str) == selected_player]
+        filtered_df = df
+        if selected_player != "جميع اللاعبين" and 'Player' in df.columns:
+            filtered_df = df[df['Player'].astype(str) == selected_player]
+            
         filtered_df = filtered_df[filtered_df['Event_Type'].isin(selected_events)]
         
         # 5. رسم الملعب والبيانات المفلترة
@@ -155,10 +179,10 @@ if uploaded_file is not None:
         # عرض جدول البيانات المفلترة أسفل الملعب للمراجعة السريعة
         st.write("---")
         st.subheader("📊 جدول البيانات المفلترة")
-        st.dataframe(filtered_df[['Action', 'Player', 'Team', 'Start (mm:ss)', 'Outcome']].reset_index(drop=True), use_container_width=True)
+        st.dataframe(filtered_df[['Action_Clean', 'Player', 'Team Tag', 'Start']].reset_index(drop=True), use_container_width=True)
         
     else:
-        st.error("⚠️ خطأ في هيكلة الملف: لم يتم العثور على أعمدة الإحداثيات الأساسية 'X Start' و 'Y Start'.")
+        st.error("⚠️ لم نتمكن من تحديد أعمدة الإحداثيات في الملف المرفوع. يرجى مراجعة عناوين الجدول.")
 else:
     # شاشة ترحيبية نظيفة تظهر عند فتح التطبيق لأول مرة
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -166,4 +190,4 @@ else:
     fig.patch.set_facecolor('#1a1a1a')
     st.pyplot(fig)
     plt.close(fig)
-    st.info("💡 لوحة التحليل جاهزة. يرجى رفع ملف المباراة من القائمة الجانبية للبدء.")
+    st.info("💡 لوحة التحليل جاهزة. يرجى رفع ملف المباراة الجديد من القائمة الجانبية للبدء.")
