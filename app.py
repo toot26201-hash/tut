@@ -99,7 +99,6 @@ if uploaded_file is not None:
         st.sidebar.write("---")
         st.sidebar.header("🔍 فلاتر الملعب")
         
-        # فلتر نوع العرض تكتيكياً (مخطط أحداث أم خريطة حرارية)
         map_type = st.sidebar.radio("اختر نوع العرض على الملعب:", ["مخطط الأحداث (Event Map)", "الخريطة الحرارية (Heatmap)"])
         
         # فلتر اللاعبين
@@ -133,25 +132,27 @@ if uploaded_file is not None:
             st.markdown("### 📈 ملخص سريع")
             st.metric(label="إجمالي الأحداث المعروضة", value=len(filtered_df))
             st.write("---")
-            # عرض توزيع الأحداث المفلترة كنسبة مئوية
             if not filtered_df.empty:
                 st.markdown("**توزيع الأحداث الحالي:**")
                 event_counts = filtered_df['Event_Type'].value_counts()
                 st.write(event_counts)
 
         with col_pitch:
-            fig, ax = plt.subplots(figsize=(12, 9))
+            fig, ax = plt.subplots(figsize=(12, 10))
             pitch.draw(ax=ax)
             fig.patch.set_facecolor('#1a1a1a')
             
-            display_name = "All Players" if selected_player == "جميع اللاعبين (الفريق)" else selected_player
-            ax.text(60, 40, display_name, color='#D4AF37', fontsize=50, fontweight='bold', 
-                    ha='center', va='center', alpha=0.08, zorder=1)
+            # تحديد اسم العنوان بشكل واضح جداً
+            display_title = "TEAM HEATMAP" if selected_player == "جميع اللاعبين (الفريق)" else f"{selected_player.upper()} - HEATMAP"
+            if map_type == "مخطط الأحداث (Event Map)":
+                display_title = display_title.replace("HEATMAP", "EVENT MAP")
+                
+            # وضع العنوان بخط عريض وواضح جداً أعلى الملعب
+            ax.set_title(display_title, color='#D4AF37', fontsize=24, fontweight='bold', pad=20, ha='center')
 
             # 🔘 الحالة الأولى: الخريطة الحرارية (Heatmap)
             if map_type == "الخريطة الحرارية (Heatmap)":
-                if len(filtered_df) > 2:  # الـ KDE يحتاج على الأقل نقطتين أو 3 لرسم المنحنى
-                    # رسم الخريطة الحرارية بنعومة وبألوان نارية تليق بالخلفية الغامقة
+                if len(filtered_df) > 2:
                     sns.kdeplot(
                         x=filtered_df['x_scaled'], 
                         y=filtered_df['y_scaled'], 
@@ -164,7 +165,7 @@ if uploaded_file is not None:
                         zorder=2
                     )
                 else:
-                    st.warning("⚠️ البيانات المتاحة قليلة جداً لرسم خريطة حرارية دقيقة لهذا الفلتر. يرجى اختيار أحداث أكثر.")
+                    st.warning("⚠️ البيانات المتاحة قليلة جداً لرسم خريطة حرارية دقيقة لهذا الفلتر.")
             
             # 🔘 الحالة الثانية: مخطط الأحداث العادي (Event Map)
             else:
