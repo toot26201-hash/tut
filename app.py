@@ -32,12 +32,15 @@ if uploaded_file is not None:
             # محاولة قراءة الشيت المخصص لو موجود
             df = pd.read_excel(uploaded_file, sheet_name='كل الأحداث', engine='openpyxl')
         except:
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
+            try:
+                df = pd.read_excel(uploaded_file, sheet_name='All Actions', engine='openpyxl')
+            except:
+                df = pd.read_excel(uploaded_file, engine='openpyxl')
             
     # تنظيف أسماء الأعمدة من أي مسافات وتحويلها لنص
     df.columns = df.columns.astype(str).str.strip()
     
-    # خريطة ذكية لتوحيد مسميات الأعمدة (سواء كابيتال أو سمول أو عربي)
+    # خريطة ذكية لتوحيد مسميات الأعمدة
     rename_dict = {}
     for col in df.columns:
         c_low = col.lower()
@@ -48,29 +51,28 @@ if uploaded_file is not None:
         elif c_low in ['player', 'اللاعب', 'لاعب']: rename_dict[col] = 'Player'
         elif c_low in ['action', 'الأكشن', 'حدث', 'event']: rename_dict[col] = 'Action'
 
-    # إعادة تسمية الأعمدة بناءً على الفحص الذكي
+    # إعادة تسمية الأعمدة
     df = df.rename(columns=rename_dict)
     
-    # حل مشكلة تكرار اسم عمود Action لو وجد
+    # حل مشكلة تكرار اسم عمود Action
     if isinstance(df.get('Action'), pd.DataFrame):
-        # لو رجع جدول بسبب التكرار ناخد أول عمود فيه
         df['Action_Clean'] = df['Action'].iloc[:, 0].fillna('Other').astype(str).str.strip()
     elif 'Action' in df.columns:
         df['Action_Clean'] = df['Action'].fillna('Other').astype(str).str.strip()
     else:
         df['Action_Clean'] = 'Other'
     
-    # التأكد من وجود الإحداثيات الأساسية لبدء التحليل
+    # التأكد من وجود الإحداثيات الأساسية
     if 'x1' in df.columns and 'y1' in df.columns:
         
         # تحويل الإحداثيات لأرقام ومعالجة القيم المفقودة
         for col in ['x1', 'y1', 'x2', 'y2']:
             if col in df.columns:
-                if isinstance(df[col], pd.DataFrame): # حماية ضد الأعمدة المكررة
+                if isinstance(df[col], pd.DataFrame):
                     df[col] = df[col].iloc[:, 0]
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # تحجيم الإحداثيات (Scaling) بناءً على نوع الإدخال (نسبة مئوية أم أبعاد فعلية)
+        # تحجيم الإحداثيات (Scaling)
         if df['x1'].max() <= 1.0 and df['y1'].max() <= 1.0:
             df['x_scaled'] = df['x1'] * 120
             df['y_scaled'] = df['y1'] * 80
@@ -81,7 +83,7 @@ if uploaded_file is not None:
             df['x2_scaled'] = df['x2'] if 'x2' in df.columns else np.nan
             df['y2_scaled'] = df['y2'] if 'y2' in df.columns else np.nan
 
-        # تصنيف الأكشن تكتيكياً بناءً على محتوى الملف الجديد
+        # 🔍 تصنيف الأكشن التكتيكي الموسع لفك تفاصيل الـ Other
         def classify_action(val):
             val = val.lower()
             if 'pass' in val or 'تمرير' in val: return "Pass"
@@ -91,7 +93,11 @@ if uploaded_file is not None:
             if 'interception' in val or 'extraction' in val or 'قطع' in val: return "Interception"
             if 'aerial' in val or 'هوائي' in val: return "Aerial Duel"
             if 'ground' in val or 'أرضي' in val: return "Ground Duel"
-            return "Other"
+            if 'dribble' in val or 'مراوغة' in val or 'ترقيص' in val: return "Dribble"  # تفكيك الـ Other
+            if 'miscontrol' in val or 'فقد' in val: return "Miscontrol"  # تفكيك الـ Other
+            if 'foul' in val or 'خطأ' in val: return "Foul"
+            if 'kick-off' in val or 'بداية' in val: return "Kick-off"
+            return "Other Actions"
 
         df['Event_Type'] = df['Action_Clean'].apply(classify_action)
 
@@ -130,7 +136,7 @@ if uploaded_file is not None:
         ax.text(60, 40, display_name, color='#D4AF37', fontsize=50, fontweight='bold', 
                 ha='center', va='center', alpha=0.08, zorder=1)
 
-        # إعدادات الألوان والأشكال لكل حدث تكتيكي
+        # 🔍 إعدادات الألوان والأشكال المفككة والجديدة بالكامل
         event_configs = {
             "Pass": {"color": "#00ffcc", "marker": None, "is_arrow": True},
             "Shot": {"color": "#00ff00", "marker": "*"},
@@ -139,7 +145,11 @@ if uploaded_file is not None:
             "Clearance": {"color": "#ffffff", "marker": "s"},
             "Aerial Duel": {"color": "#3399ff", "marker": "^"},
             "Ground Duel": {"color": "#8B4513", "marker": "v"},
-            "Other": {"color": "#aaaaaa", "marker": "d"}
+            "Dribble": {"color": "#ff9900", "marker": "P"},       # لون برتقالي للمراوغات
+            "Miscontrol": {"color": "#ff3333", "marker": "h"},    # لون أحمر لفقد الكرة
+            "Foul": {"color": "#ccff00", "marker": "d"},
+            "Kick-off": {"color": "#9933ff", "marker": "p"},
+            "Other Actions": {"color": "#aaaaaa", "marker": "o"}
         }
 
         legend_elements = []
@@ -179,7 +189,15 @@ if uploaded_file is not None:
         # عرض جدول البيانات المفلترة أسفل الملعب للمراجعة السريعة
         st.write("---")
         st.subheader("📊 جدول البيانات المفلترة")
-        st.dataframe(filtered_df[['Action_Clean', 'Player', 'Team Tag', 'Start']].reset_index(drop=True), use_container_width=True)
+        
+        team_col = 'Team Tag' if 'Team Tag' in filtered_df.columns else ('Team' if 'Team' in filtered_df.columns else 'Action_Clean')
+        start_col = 'Start' if 'Start' in filtered_df.columns else ('Start (mm:ss)' if 'Start (mm:ss)' in filtered_df.columns else 'Action_Clean')
+        
+        show_cols = ['Action_Clean', 'Player']
+        if team_col in filtered_df.columns: show_cols.append(team_col)
+        if start_col in filtered_df.columns: show_cols.append(start_col)
+        
+        st.dataframe(filtered_df[show_cols].reset_index(drop=True), use_container_width=True)
         
     else:
         st.error("⚠️ لم نتمكن من تحديد أعمدة الإحداثيات في الملف المرفوع. يرجى مراجعة عناوين الجدول.")
